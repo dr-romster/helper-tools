@@ -4,6 +4,7 @@
 # generate dummy data
 
 library(dplyr)
+library(tibble)
 
 set_A <- c("biomarker_A",
            "biomarker_B",
@@ -21,6 +22,8 @@ data <- matrix(rnorm(100 * 11), ncol=11)
 
 colnames(data) <- c(set_A, set_B)
 
+# create PCA object
+
 combined_pca <- 
   prcomp(data)
 
@@ -30,7 +33,7 @@ combined_loadings <-
   combined_pca$rotation %>% 
   data.frame %>% 
   tibble::rownames_to_column("marker") %>% 
-  mutate(bio_type = ifelse(biomarker %in% reduced_acc_cytokines, 
+  mutate(bio_type = ifelse(marker %in% Set_A, 
                            "biomarker", "mediator"))
 
 biomarker_loadings <- 
@@ -71,7 +74,7 @@ theta_radians <- acos(cos_theta)
 
 theta_radians 
 
-# if theta radians ~ pi/2 then we can assume normality
+# if theta radians ~ pi/2 then we can say that Set A and Set B are orthogonal
 
 
 
