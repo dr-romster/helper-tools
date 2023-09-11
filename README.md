@@ -11,4 +11,4 @@ $$
 
 - `pao2_fio2_interpolation.Rmd`
  
-How different strategies for interpolating missing data from electronic health records effects results and derived measurements. 
+How different strategies for interpolating missing data from electronic health records affects results and derived measurements. 
