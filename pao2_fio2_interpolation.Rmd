@@ -1,0 +1,394 @@
+---
+title: "PaO2 & FiO2 Interpolation Strategies"
+author: "Romit Samanta, University of Cambridge"
+date: '2022-09-27'
+output: 
+  html_document: 
+    highlight: zenburn
+    theme: spacelab
+    fig_width: 8
+    fig_height: 6
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+
+This document will explore different strategies to interpolate/ impute unknown PaO~2~ FiO~2~ ratios and demonstrate how they can affect results, using synthetic data. 
+
+**NB** PaO~2~ in this document are in kPa (multiply by 7.5003 for mmHg). 
+
+For context:
+
+Mild ARDS = PF < 40 kPa [300mmHg]
+
+Moderate ARDS = PF < 26.7 kPa [200mmHg]
+
+Mild ARDS = PF < 13.3 kPa [100mmHg]
+
+```{r packages}
+library(dplyr)
+library(DT)
+library(ggplot2)
+```
+
+
+-------
+
+
+#### Synthetic data for patient who might have had severe respiratory failure. 
+
+```{r severe df creation, echo =T}
+library(dplyr)
+
+severe_pf <- 
+  data.frame(time = c(0, 3,   5,   8,   10,   12,   14,   18,   22),
+             fio2 = c(1, 1, 0.8, 0.8, 0.75, 0.75, 0.85, 0.85, 0.85),
+             pao2 =c(12,20,  12,  13,   9,     9,   10,  8.5,    9))
+
+all_times_and_fio2 <- 
+  data.frame(time = seq(0, 23,1),
+             fio2 = c(rep(1,4), rep(0.8,5), rep(0.75, 4),
+                      rep(0.85, 11)))
+
+all_times_and_fio2_pf <- 
+  all_times_and_fio2 %>% 
+  left_join(severe_pf %>% dplyr::select(time, pao2), by = "time") 
+
+DT::datatable(all_times_and_fio2_pf, 
+              caption = "Table 1: Measured PaO2 and FIO2 values over a 24 hour period", 
+              width = 350)
+```
+
+
+```{r echo = F}
+all_times_and_fio2_pf <- 
+  all_times_and_fio2_pf%>% 
+  mutate(pf_ratio = pao2 / fio2) %>% 
+  mutate(lag_interp_pao2 = pao2) %>% 
+  mutate(lag_interp_pf = pf_ratio)
+```
+
+
+#### Interpolate using:
+
+[1] - last known PaO~2~ 
+
+[2] - last known PF ratio
+
+
+```{r echo = T}
+for(i in 1:24){
+  
+  pa_n <- all_times_and_fio2_pf$pao2[i]
+  
+  all_times_and_fio2_pf$lag_interp_pao2[i] <- 
+    ifelse(is.na(pa_n), 
+    all_times_and_fio2_pf$lag_interp_pao2[i-1], 
+    pa_n)
+  
+  pf_n <- all_times_and_fio2_pf$pf_ratio[i]
+  
+  all_times_and_fio2_pf$lag_interp_pf[i] <- 
+    ifelse(is.na(pf_n), 
+    all_times_and_fio2_pf$lag_interp_pf[i-1], 
+    pf_n)
+  
+}
+
+DT::datatable(all_times_and_fio2_pf,
+              caption = "Table 2: First two approaches to imputation - last known values of PaO2 or PF ratio",
+              width = 550) %>% 
+  DT::formatRound(columns = c(4:6))
+```
+#### We can also interpolate using:
+
+[3] - Linear regression between known points (linear interpolation)
+
+
+[4] - Multiple imputation using chained equations (MICE)
+
+```{r echo = T}
+
+# linear interpolation of pf ratio values using the zoo package
+all_times_and_fio2_pf$linear_interp_pf <-  
+  zoo::na.approx(all_times_and_fio2_pf$pf_ratio, 
+                 xout = all_times_and_fio2_pf$time + 1, rule = 2)
+```
+
+```{r echo = F, eval = T, include = F}
+# multiple imputation using mice
+set.seed(1234)
+m_imp <- mice::mice(all_times_and_fio2_pf %>% dplyr::select(time, pf_ratio), verbose = F)
+```
+
+```{r echo = T}
+# multiple imputation using mice
+
+# m_imp <- mice::mice(all_times_and_fio2_pf %>% dplyr::select(time, pf_ratio), verbose = F)
+m_imputed <- mice::complete(m_imp)
+all_times_and_fio2_pf$mice_imputed_pf <- m_imputed$pf_ratio
+
+DT::datatable(all_times_and_fio2_pf, 
+              caption = "Table 3: Linear interpolation and multiple imputation methods",
+              width = 750) %>% 
+  DT::formatRound(columns = c(4:8))
+```
+
+#### Plot curves
+
+These plots show the estimated PF ratios over the 24 hour period using each of the described approaches. 
+
+The red circles are the known, non-interpolated values.The dashed grey lines are the thresholds for moderate (26.7 kPa) and severe (13.3 kPa) ARDS. 
+
+```{r echo =F, warning=F, message=F}
+p_core <- 
+  ggplot(all_times_and_fio2_pf,
+         aes(x = time)) +
+  geom_hline(yintercept = 13.3, linetype = 'dashed', colour = 'grey', alpha= 0.6)+ # severe ARDS threshold
+  geom_hline(yintercept = 26.7, linetype = 'dashed', colour = 'grey', alpha= 0.8)+ # moderate ARDS threshold
+  geom_point(aes(y = pf_ratio), colour = 'black', alpha = 0.7, pch = 21, fill ='tomato', size = 3) +
+  scale_y_continuous(limits = c(8, 30))+
+  labs(subtitle = "Severe case",
+       y = "PaO2 FiO2 ratio (kPa)",
+       x = "Time post intubation (hours)") +
+  theme_light()
+
+p1 <- p_core +
+  geom_line(aes(y = lag_interp_pao2/fio2), colour = "darkgreen", alpha = 0.8)+
+
+  labs(title = "Lag interpolation of PaO2")
+    
+ 
+p2 <- p_core +
+  geom_line(aes(y = lag_interp_pf), colour = "skyblue", alpha = 0.8)+
+  labs(title = "Lag interpolation of PaO2:FiO2")
+
+p3 <- p_core +
+  geom_line(aes(y = linear_interp_pf), colour = "purple", alpha = 0.8)+
+  labs(title = "Linear interpolation of PaO2:FiO2")
+
+
+p4 <- p_core +
+  geom_line(aes(y = mice_imputed_pf), colour = "black", alpha = 0.6)+
+  labs(title = "Multiple imputation of PaO2:FIO2")
+
+cowplot::plot_grid(p1, p2, p3, p4, nrow = 2)
+```
+
+**Mean PF ratios over 24 hours based on each approach** 
+
+There is approximately a 0.5 kPa difference between the largest and smallest obtained means. It might lead to a change in ARDS severity classification as the values bridge the severe ARDS threshold of 13.3 kPa (100 mmHg). 
+
+```{r echo = F}
+all_times_and_fio2_pf %>% 
+  mutate(no_interpolation_mean_pf = mean(pao2, na.rm = T)/mean(fio2)) %>% 
+  dplyr::select(c("no_interpolation_mean_pf","pf_ratio","lag_interp_pf"  ,
+                  "linear_interp_pf", "mice_imputed_pf" )) %>% 
+  summarise_all(mean, na.rm = T) %>% 
+  magrittr::set_colnames(c("mean Pao2 / mean FiO2, no interpolation",
+                           'mean pf ratios from paired Pao2 & Fio2, no interpolation',
+                           "mean last known value interpolation of PF",
+                           "mean linear PF interpolation",
+                           "mean MICE imputed PF")) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames("Mean") 
+```
+
+----
+
+#### Synthetic data using a case of moderate ARDS
+
+The errors are probably slightly greater in magnitude in the patients on lower FiO~2~ as the smaller denominator magnifies errors when calculating PaO~2~ FiO~2~ ratios. 
+
+Synthesise a new data set
+
+```{r echo = T}
+moderate_pf <- 
+  data.frame(time = c(0, 3,   5,   8,   10,   12,   14,   18,   22),
+             fio2 = c(1, 1, 0.6, 0.6, 0.5,  0.5, 0.85, 0.8, 0.85),
+             pao2 =c(12,20,  12,  13,   9,     9,   10,  10,    9))
+
+all_times_and_fio2_moderate <- 
+  data.frame(time = seq(0,23),
+             fio2 = c(rep(0.85, 4), rep(0.6,5), 
+                      rep(0.5, 4), rep(0.85, 5),
+                      rep(0.8, 4), rep(0.85, 2) ))
+
+all_times_and_fio2_moderate_pf <- 
+  all_times_and_fio2_moderate %>% 
+  left_join(severe_pf %>% dplyr::select(time, pao2), by = "time") 
+
+DT::datatable(all_times_and_fio2_moderate_pf,
+              caption = "Table 4: Measured PaO2 and FIO2 values over a 24 hour period in moderate severity case", 
+              width = 350)
+```
+
+```{r echo = F}
+all_times_and_fio2_moderate_pf <- 
+  all_times_and_fio2_moderate_pf %>% 
+  mutate(pf_ratio = pao2 / fio2) %>% 
+  mutate(lag_interp_pao2 = pao2) %>% 
+  mutate(lag_interp_pf = pf_ratio)
+```
+
+```{r echo = T}
+for(i in 1:24){
+  
+  pa_n <- all_times_and_fio2_moderate_pf$pao2[i]
+  all_times_and_fio2_moderate_pf$lag_interp_pao2[i] <- 
+    ifelse(is.na(pa_n), 
+           all_times_and_fio2_moderate_pf$lag_interp_pao2[i-1], 
+           pa_n)
+  
+  pf_n <- all_times_and_fio2_moderate_pf$pf_ratio[i]
+  all_times_and_fio2_moderate_pf$lag_interp_pf[i] <- 
+    ifelse(is.na(pf_n), 
+           all_times_and_fio2_moderate_pf$lag_interp_pf[i-1], 
+           pf_n)
+  
+}
+
+# linear interpolation of pf ratio values using the zoo package
+all_times_and_fio2_moderate_pf$linear_interp_pf <-  
+  zoo::na.approx(all_times_and_fio2_moderate_pf$pf_ratio, 
+                 xout = all_times_and_fio2_moderate_pf$time + 1, rule = 2)
+```
+
+```{r echo= F, eval = T, include = F}
+set.seed(1234)
+m_imp_mod <- mice::mice(all_times_and_fio2_moderate_pf %>% dplyr::select(time, pf_ratio))
+```
+
+```{r echo = T}
+# multiple imputation using mice
+# m_imp_mod <- mice::mice(all_times_and_fio2_moderate_pf %>% dplyr::select(time, pf_ratio))
+m_imputed_mod <- mice::complete(m_imp_mod)
+all_times_and_fio2_moderate_pf$mice_imputed_pf <- m_imputed_mod$pf_ratio
+
+DT::datatable(all_times_and_fio2_moderate_pf, 
+              caption = "Table 6: Moderate ARDS linear interpolated and mice imputed PF ratios",
+              width = 750) %>% 
+  DT::formatRound(columns = c(4:8))
+```
+
+
+#### Plot imputed curves
+
+The MICE method can demonstrate some odd behaviours. I used the 'pmm' method which is the default imputation method with this package, maybe other methods are better longitudinal/time series data. 
+
+```{r echo =F, warning=F, message=F}
+
+m_core <- 
+  ggplot(all_times_and_fio2_moderate_pf,
+         aes(x = time)) +
+  geom_hline(yintercept = 13.3, linetype = 'dashed', colour = 'grey', alpha= 0.6)+ # severe ARDS threshold
+  geom_hline(yintercept = 26.7, linetype = 'dashed', colour = 'grey', alpha= 0.8)+ # moderate ARDS threshold
+  geom_point(aes(y = pf_ratio), colour = 'black', alpha = 0.7, pch = 21, fill ='tomato', size = 3) +
+  scale_y_continuous(limits = c(8, 35))+
+  labs(subtitle = "Moderate case",
+       y = "PaO2 FiO2 ratio (kPa)",
+       x = "Time post intubation (hours)") +
+  theme_light()
+
+
+m1 <- m_core +
+  geom_line(aes(y = lag_interp_pao2/fio2), colour = "darkgreen", alpha = 0.8)+
+  labs(title = "Lag interpolation of PaO2")
+
+
+m2 <- m_core +
+  geom_line(aes(y = lag_interp_pf), colour = "skyblue", alpha = 0.8)+
+  labs(title = "Lag interpolation of PaO2:FiO2")
+
+m3 <- m_core +
+  geom_line(aes(y = linear_interp_pf), colour = "purple", alpha = 0.8)+
+  labs(title = "Linear interpolation of PaO2:FiO2")
+
+
+m4 <- m_core +
+  geom_line(aes(y = mice_imputed_pf), colour = "black", alpha = 0.6)+
+  labs(title = "Multiple imputation of PaO2:FIO2")
+
+cowplot::plot_grid(m1, m2, m3, m4, nrow = 2)
+
+```
+
+**Mean PF ratios over 24 hours based on each approach** 
+
+There is approximately a 0.9 kPa difference between the largest and smallest obtained mean PaO2 FiO2 ratios.
+
+```{r echo = F}
+
+all_times_and_fio2_moderate_pf %>% 
+  mutate(no_interpolation_mean_pf = mean(pao2, na.rm = T)/mean(fio2)) %>% 
+  dplyr::select(c("no_interpolation_mean_pf","pf_ratio","lag_interp_pf"  ,
+                                          "linear_interp_pf", "mice_imputed_pf" )) %>% 
+  summarise_all(mean, na.rm = T) %>% 
+  magrittr::set_colnames(c("mean pao2 / mean pf, no interpolation",
+                           'mean pf ratios from paired pao2 & fio2, no interpolation',
+                           "mean last know value interpolation of PF",
+                           "mean linear PF interpolation",
+                           "mean MICE imputed PF")) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames("Mean")
+```
+
+```{r}
+all_times_and_fio2_moderate_pf %>% 
+  mutate(no_interpolation_mean_pf = mean(pao2, na.rm = T)/mean(fio2)) %>% 
+  dplyr::select(c("no_interpolation_mean_pf","pf_ratio","lag_interp_pf"  ,
+                                          "linear_interp_pf", "mice_imputed_pf" )) %>% 
+  summarise_all(mean, na.rm = T) %>% 
+   t() %>% 
+  data.frame() %>% 
+  tbl_df() %>% 
+  magrittr::set_colnames("Mean") %>% 
+  mutate(group = 2) %>% 
+bind_rows(
+  all_times_and_fio2_pf %>% 
+  mutate(no_interpolation_mean_pf = mean(pao2, na.rm = T)/mean(fio2)) %>% 
+  dplyr::select(c("no_interpolation_mean_pf","pf_ratio","lag_interp_pf"  ,
+                  "linear_interp_pf", "mice_imputed_pf" )) %>% 
+  summarise_all(mean, na.rm = T) %>% 
+  t() %>% 
+  data.frame() %>% 
+  tbl_df() %>% 
+  magrittr::set_colnames("Mean") %>% 
+   mutate(group = 1) ) %>% 
+  mutate(group = as.factor(group)) %>% 
+  ggplot(aes(y = Mean, x = group, fill = group)) + 
+  geom_hline(yintercept = 13.3, linetype = "dashed", colour = "grey", alpha = 0.8)+
+  geom_boxplot(width = 0.4, fill = NA) +
+  geom_point( pch = 21, size = 2) +
+  labs(x = "", y = "Mean PF")+
+  scale_x_discrete(breaks = c(1,2), labels = c("Simulated\nsevere data", "Simulated\nmoderate data"))+
+  
+  scale_y_continuous(limits = c(12.5 ,16.5))+
+  scale_fill_manual(values = c("#e69f00", "#0072b2"))+
+  ggpubr::theme_pubclean() +
+  
+  theme(legend.position = "none", 
+        strip.background = element_blank(),
+        axis.text = element_text(size = 14)) 
+```
+
+
+-----
+
+### Summary
+
+- The non-interpolation methods tended to produced outlier estimates of the mean compared with the interpolated methods, especially in the moderate ARDS example where the errors would be compounded by a lower FiO~2~ denominator. 
+
+- On balance, it is probably safest to interpolate values before abstracting mean values, especially as these values may have been collected at inconsistent intervals and inconsistent frequency between patients. 
+Sicker patients probably have more blood gases sampled in a given period and respiratory therapists might have recorded ventilator settings more frequently as part of increased assessment frequency. This of course does not apply if ventilator data is automatically slaved to the EHR flowsheets. 
+
+- The example I have used here is with PaO~2~-FiO~2~ ratios, due to familiarity, but the same ideas are likely to apply when calculating mean compliance, tidal volume etc. The values at highest risk of errors are the derived ones (compliance, PaO~2~-FiO~2~ ratio) as there will be compounding of the uncertainty around the measured values. 
+
+----
+
+
+#### Fin
