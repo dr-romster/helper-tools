@@ -17,7 +17,7 @@ How different strategies for interpolating missing data from electronic health r
 
 Okabe-Ito (2008) developed this palette which can be easily interpreted with different colour visual deficiencies for qualitiative scales. 
 
-![](../master/img/palette-Okabe-Ito-1.png)
+![](../img/palette-Okabe-Ito-1.png)
 
 Orange, skyblue, bluish green, yellow, blue, vermilion, reddish purple, black
 
