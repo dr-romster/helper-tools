@@ -15,7 +15,7 @@ How different strategies for interpolating missing data from electronic health r
 
 ## Take list column back to simple values column
 
-un_mat <- function(x){ return(x[,1])}
+`un_mat <- function(x){ return(x[,1])}`
 
 
 ## Colour blind safe colours
