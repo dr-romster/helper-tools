@@ -13,6 +13,11 @@ $$
  
 How different strategies for interpolating missing data from electronic health records affects results and derived measurements. 
 
+## Take list column back to simple values column
+
+un_mat <- function(x){ return(x[,1])}
+
+
 ## Colour blind safe colours
 
 Okabe-Ito (2008) developed this palette which can be easily interpreted with different colour visual deficiencies for qualitiative scales. 
