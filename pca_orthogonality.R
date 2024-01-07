@@ -28,6 +28,7 @@ combined_pca <-
   prcomp(data)
 
 # extract loadings
+# the loadinga are the unit eigenvectors from the SVD
 
 combined_loadings <- 
   combined_pca$rotation %>% 
@@ -63,7 +64,7 @@ dot_product <- sum(biomarker_loadings * mediator_loadings)
 
 # a dot product of zero implies orthogonality
 
-# cacluate the angle ($/theta$) between the two mean vectors
+# calcuate the angle ($/theta$) between the two mean vectors
 
 cos_theta <- 
   sum(biomarker_mean_loading * mediator_mean_loading) / 
