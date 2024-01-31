@@ -13,6 +13,10 @@ $$
  
 How different strategies for interpolating missing data from electronic health records affects results and derived measurements. 
 
+- `transcript_to_symbol.R`
+
+Convert the Ensembl gene trancript id's from RNA-sequencing experiments to gene symbols 
+
 ## Take list column back to simple values column
 
 `un_mat <- function(x){ return(x[,1])}`
